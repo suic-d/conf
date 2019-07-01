@@ -1,1 +1,1 @@
-development configuration
+# development configuration
