@@ -1,0 +1,148 @@
+#!/bin/bash
+
+memcached_bin='/usr/local/memcached/bin/memcached'
+memcached_pid='/tmp/memcached.pid'
+memcached_opts="-d -m 64m -u root -l 127.0.0.1 -p 11211 -c 1024 -P $memcached_pid"
+
+wait_for_pid () {
+    try=0
+
+    while test $try -lt 35 ; do
+
+        case "$1" in
+            'created')
+                if [ -f "$2" ] ; then
+                    PID=`cat $2`
+                    if ps -p $PID | grep -q $PID ; then
+                        try=''
+                        break
+                    fi
+                fi
+            ;;
+
+            'removed')
+                if [ ! -f "$2" ] ; then
+                    try=''
+                    break
+                fi
+
+                PID=`cat $2`
+                if ! ps -p $PID | grep -q $PID ; then
+                    try=''
+                    break
+                fi
+            ;;
+        esac
+
+        echo -n .
+        try=`expr $try + 1`
+        sleep 1
+
+    done
+}
+
+case "$1" in
+    start)
+        echo -n "Starting memcached... "
+
+        if [ -r $memcached_pid ] ; then
+            PID=`cat $memcached_pid`
+            if ps -p $PID | grep -q $PID ; then
+                echo "memcached (pid $PID) is running..."
+                exit 1
+            fi
+        fi
+
+        $memcached_bin $memcached_opts
+
+        if [ "$?" != 0 ] ; then
+            echo " failed"
+            exit  1
+        fi
+
+        wait_for_pid created $memcached_pid
+
+        if [ -n "$try" ] ; then
+            echo " failed"
+            exit 1
+        else
+            echo " done"
+        fi
+    ;;
+
+    stop)
+        echo -n "Stoping memcached... "
+
+        if [ ! -r $memcached_pid ] ; then
+            echo "warning, no pid file found - memcached is not running ?"
+            exit 1
+        fi
+
+        PID=`cat $memcached_pid`
+        if ! ps -p $PID | grep -q $PID ; then
+            echo "memcached is not running"
+            exit 1
+        fi
+
+        kill -QUIT `cat $memcached_pid`
+
+        if [ "$?" != 0 ] ; then
+            echo " failed. Use force-quit"
+            exit 1
+        fi
+
+        wait_for_pid removed $memcached_pid
+
+        if [ -n "$try" ] ; then
+            echo " failed. Use force-quit"
+            exit 1
+        else
+            echo " done"
+        fi
+    ;;
+
+    status)
+        if [ ! -r $memcached_pid ] ; then
+            echo "memcached is stopped"
+            exit 0
+        fi
+
+        PID=`cat $memcached_pid`
+        if ps -p $PID | grep -q $PID ; then
+            echo "memcached (pid $PID) is running..."
+        else
+            echo "memcached dead but pid file exists"
+        fi
+    ;;
+
+    force-quit)
+        echo -n "Terminating memcached "
+
+        if [ ! -r $memcached_pid ] ; then
+            echo "warning, no pid file found - memcached is not running ?"
+            exit 1
+        fi
+
+        kill -TERM `cat $memcached_pid`
+
+        wait_for_pid removed $memcached_pid
+
+        if [ -n "$try" ] ; then
+            echo " failed"
+            exit 1
+        else
+            echo " done"
+        fi
+    ;;
+
+    restart)
+        $0 stop
+        $0 start
+    ;;
+
+    *)
+        echo "Usage: $0 {start|stop|force-quit|restart|status}"
+        exit 1
+    ;;
+
+esac

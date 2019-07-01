@@ -1,0 +1,127 @@
+#!/bin/bash
+
+redis_server='/usr/local/redis/src/redis-server'
+redis_conf='/usr/local/redis/redis.conf'
+
+wait_for_pid () {
+    try=0
+
+    while test $try -lt 35 ; do
+        case "$1" in
+            'created')
+                PID=$(ps -ef | grep "$redis_server" | grep -v grep | awk '{print $2}')
+                if [ "$PID" != "" ] ; then
+                    try=''
+                    break
+                fi
+            ;;
+
+            'removed')
+                PID=$(ps -ef | grep "$redis_server" | grep -v grep | awk '{print $2}')
+                if [ "$pid" = "" ] ; then
+                    try=''
+                    break
+                fi
+            ;;
+        esac
+
+        echo -n .
+        try=`expr $try + 1`
+        sleep 1
+
+    done
+}
+
+case "$1" in
+    start)
+        echo -n "Starting redis... "
+
+        PID=$(ps -ef | grep "$redis_server" | grep -v grep | awk '{print $2}')
+        if [ "$PID" != "" ] ; then
+            echo "redis (pid $PID) already running."
+            exit 1
+        fi
+
+        $redis_server $redis_conf
+
+        if [ "$?" != 0 ] ; then
+            echo " failed"
+            exit 1
+        fi
+
+        wait_for_pid created
+
+        if [ -n "$try" ] ; then
+            echo " failed"
+            exit 1
+        else
+            echo " done"
+        fi
+    ;;
+
+    stop)
+        echo -n "Stoping redis... "
+
+        PID=$(ps -ef | grep "$redis_server" | grep -v grep | awk '{print $2}')
+        if [ "$PID" = "" ] ; then
+            echo "redis is not running."
+            exit 1
+        fi
+
+        kill -QUIT $PID
+
+        if [ "$?" != 0 ] ; then
+            echo " failed. Use force-quit"
+            exit 1
+        fi
+
+        wait_for_pid removed
+
+        if [ -n "$try" ] ; then
+            echo " failed. Use force-quit"
+            exit 1
+        else
+            echo "done"
+        fi        
+    ;;
+
+    status)
+        PID=$(ps -ef | grep "$redis_server" | grep -v grep | awk '{print $2}')
+        if [ "$PID" != "" ] ; then
+            echo "redis (pid $PID) is running..."
+        else
+            echo "redis is stopped"
+        fi
+    ;;
+
+    force-quit)
+        echo -n "Terminating redis..."
+
+        PID=$(ps -ef | grep "$redis_server" | grep -v grep | awk '{print $2}')
+        if [ "$PID" = "" ] ; then
+            echo "redis is stopped"
+            exit 1
+        fi
+
+        kill -TERM $PID
+
+        wait_for_pid removed
+
+        if [ -n "$try" ] ; then
+            echo " failed"
+            exit 1
+        else
+            echo " done"
+        fi
+    ;;
+
+    restart)
+        $0 stop
+        $0 start
+    ;;
+
+    *)
+        echo "Usage: $0 {start|stop|force-quit|restart|status}"
+        exit 1
+    ;;
+esac

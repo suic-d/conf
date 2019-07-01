@@ -1,0 +1,147 @@
+#!/bin/bash
+
+mongod_bin='/usr/local/mongodb/bin/mongod'
+mongod_conf='/usr/local/mongodb/mongod.yaml'
+mongod_pid='/tmp/mongod.pid'
+
+wait_for_pid () {
+    try=0
+
+    while test $try -lt 35 ; do
+
+        case "$1" in
+            'created')
+                if [ -f "$2" ] ; then
+                    PID=`cat $2`
+                    if ps -p $PID | grep -q $PID ; then
+                        try=''
+                        break
+                    fi
+                fi
+            ;;
+
+            'removed')
+                if [ ! -f "$2" ] ; then
+                    try=''
+                    break
+                fi
+
+                PID=`cat $2`
+                if ! ps -p $PID | grep -q $PID ; then
+                    try=''
+                    break
+                fi
+            ;;
+        esac
+
+        echo -n .
+        try=`expr $try + 1`
+        sleep 1
+
+    done
+}
+
+case "$1" in
+    start)
+        echo -n "Starting mongod... "
+
+        if [ -r $mongod_pid ] ; then
+            PID=`cat $mongod_pid`
+            if ps -p $PID | grep -q $PID ; then
+                echo "mongod (pid $PID) is running..."
+                exit 1
+            fi
+        fi
+
+        $mongod_bin -f $mongod_conf
+
+        if [ "$?" != 0 ] ; then
+            echo " failed"
+            exit 1
+        fi
+
+        wait_for_pid created $mongod_pid
+
+        if [ -n "$try" ] ; then
+            echo " failed"
+            exit 1
+        else
+            echo " done"
+        fi
+    ;;
+
+    stop)
+        echo -n "Stoping mongod... "
+
+        if [ ! -r $mongod_pid ] ; then
+            echo "warning, no pid file found - mongod is not running ?"
+            exit 1
+        fi
+
+        PID=`cat $mongod_pid`
+        if ! ps -p $PID | grep -q $PID ; then
+            echo "mongod is not running"
+            exit 1
+        fi
+
+        $mongod_bin --shutdown -f $mongod_conf
+
+        if [ "$?" != 0 ] ; then
+            echo " failed. Use force-quit"
+            exit 1
+        fi
+
+        wait_for_pid removed $mongod_pid
+
+        if [ -n "$try" ] ; then
+            echo " failed. Use force-quit"
+            exit 1
+        else
+            echo " done"
+        fi
+    ;;
+
+    status)
+        if [ ! -r $mongod_pid ] ; then
+            echo "mongod is stopped"
+            exit 0
+        fi
+
+        PID=`cat $mongod_pid`
+        if ps -p $PID | grep -q $PID ; then
+            echo "mongod (pid $PID) is running..."
+        else
+            echo "mongod dead but pid file exists"
+        fi
+    ;;
+
+    force-quit)
+        echo -n "Termination mongod "
+
+        if [ ! -r $mongod_pid ] ; then
+            echo "warning, no pid file found - mongod is not running ?"
+            exit 1
+        fi
+
+        kill -TERM `cat $mongod_pid`
+
+        wait_for_pid removed $mongod_pid
+
+        if [ -n "$try" ] ; then
+            echo " failed"
+            exit 1
+        else
+            echo " done"
+        fi
+    ;;
+
+    restart)
+        $0 stop
+        $0 start
+    ;;
+
+    *)
+        echo "Usage: $0 {start|stop|force-quit|restart|status}"
+        exit 1
+    ;;
+esac
